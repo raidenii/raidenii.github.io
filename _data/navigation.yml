@@ -2,7 +2,7 @@
 main:
    - title: "Tags"
      url: /tags/
-   - title: "Posts by Year"
+   - title: "Archive"
      url: /year-archive/
    - title: "About"
      url: /about/
