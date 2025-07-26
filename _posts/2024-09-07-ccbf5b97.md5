@@ -97,12 +97,67 @@ AT+EGMR=1,7,"new imei"
 
 reboot using `AT+CFUN=1,1`, then run `AT+GSN` again to check whether it persists.
 
-To change outgoing TTL, assuming using openwrt 21+ (which uses nftables), put the following in `/etc/firewall.users`:
+To change outgoing TTL, enable ADB first. Get the key:
 
 ```
-nft add rule inet fw4 mangle_postrouting oifname usb0 ip ttl set 65
-nft add rule inet fw4 mangle_postrouting oifname usb0 ip6 hoplimit set 65
+AT+QADBKEY?
++QADBKEY: 12345678
+OK
 ```
+
+Then use a Python script to calculate the unlock key:
+
+```
+import logging
+import os
+import argparse
+import sys
+
+def generateUnlockKey(sn):
+    """
+    @param sn: the serial number to generate an unlock key for
+    """
+    salt = "$1${0}$".format(sn)
+    c = crypt("SH_adb_quectel", salt)
+    return c[12:27]
+
+def main():
+        key = input("Enter the AT+QADBKEY? response: ")
+        c = generateUnlockKey(key)
+        print('AT+QADBKEY="{0}"'.format(c))
+
+if __name__ == "__main__":
+    logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.ERROR)
+    try:
+        from crypt import crypt
+        main()
+    except ImportError as e:
+        logging.error(e)
+```
+
+The put it back to the serial:
+
+```
+AT+QADBKEY="put-unlock-key-here"
+```
+
+Then you can use adb from openwrt to access the modem. You can use vi to edit, but for the sake of convenience, just pull the systemd unit file and script from [this git repo](https://github.com/natecarlson/quectel-rgmii-configuration-notes).
+
+Run the following to install the script and systemd:
+
+```
+adb shell mount -o remount,rw /
+adb push ttl-override /etc/initscripts
+adb push ttl-override.service /lib/systemd/system
+
+adb shell chmod +x /etc/initscripts/ttl-override
+adb shell ln -s /lib/systemd/system/ttl-override.service /lib/systemd/system/multi-user.target.wants/
+adb shell systemctl daemon-reload
+adb shell systemctl start ttl-override
+adb shell mount -o remount,ro /
+```
+
+Now the modem will automatically set all outgoing TTL/HL to 64.
 
 So far there is one bug I noticed with IPPT, that if the modem is rebooted, the openwrt interface will still have a `192.168.225.x` IP. Restarting the openwrt interface however, gets the IP from the carrier.
 
@@ -112,11 +167,4 @@ openwrt can also use `adb` to access the shell of the module, as well as updatin
 qfirehose -f /tmp/firmware
 ```
 
-After updating you might need to re-run
-
-```
-AT+QMAPWAC=1  
-AT+CFUN=1,1
-```
-
-if you found the modem is no longer in ECM mode.
+to update firmware. It appears that openwrt 24.10 x86 no longer offers `qfirehose` from its repo, you'll need it from [here](https://forumschinese.quectel.com/t/topic/7168).
